@@ -47,7 +47,7 @@ function Show-Menu {
     Write-Host "   _____" -ForegroundColor Yellow
     Write-Host "  /     \   Gestão de Equipamentos" -ForegroundColor Yellow
     Write-Host " /_______\" -ForegroundColor Yellow
-    Write-Host " |  AD   |  v1.0 - xAI Powered" -ForegroundColor Yellow
+    Write-Host " |  AD   |  v1.0 " -ForegroundColor Yellow
     Write-Host " |_______|" -ForegroundColor Yellow
     Write-Host "======================================" -ForegroundColor Cyan
     Write-Host "1. Listar equipamentos por setor" -ForegroundColor Yellow
