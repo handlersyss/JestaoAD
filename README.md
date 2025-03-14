@@ -11,7 +11,7 @@ Um script poderoso para simplificar a gestão de ativos de TI no seu domínio Ac
 
 ## Pré-requisitos  
 - **PowerShell**: Versão 5.1 ou superior (padrão no Windows).  
-- **Módulo Active Directory**: Instale via `Install-WindowsFeature RSAT-AD-PowerShell` (Windows Server) ou `Add-WindowsCapability -Online -Name Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0` (Windows 10/11).  
+- **Módulo Active Directory**: Instale via `Install-WindowsFeature RSAT-AD-PowerShell` (Windows Server) ou `Add-WindowsCapability -Online -Name Rsat.ActiveDirectory.DS-LDS.Tools---0.0.1.0` (Windows 10/11).  
 - **Permissões**: Execute como administrador com acesso ao domínio Active Directory.
 
 ### Clonando o Repositório  
