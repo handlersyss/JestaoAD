@@ -6,13 +6,72 @@ if (-not (Get-Module -Name ActiveDirectory)) {
     exit
 }
 
-# Configurações iniciais
-$Domain = "" # Digite o seu domínio
-$BaseOU = "" # Digite o caminho da OU BASE
-$LogPath = "C:\Logs\Gestao_Ativos.log"
-$ReportPath = "C:\Relatorios"
-$CacheInventory = $null # Cache para evitar consultas repetidas
-$MaxThreads = 20 # Máximo de threads para verificações paralelas
+# Verificar privilégios administrativos
+function Test-Administrator {
+    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+if (-not (Test-Administrator)) {
+    Write-Host "Este script precisa ser executado como Administrador!" -ForegroundColor Red
+    Write-Host "Por favor, reinicie o PowerShell como Administrador e execute o script novamente." -ForegroundColor Yellow
+    Pause
+    exit
+}
+
+# Substituir as configurações iniciais por:
+$ScriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ConfigPath = Join-Path -Path $ScriptPath -ChildPath "config.json"
+
+# Carregar ou criar configuração
+function Load-Config {
+    if (Test-Path $ConfigPath) {
+        try {
+            $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+            Write-Log "Configuração carregada com sucesso." 
+            return $config
+        } catch {
+            Write-Log "Erro ao carregar configuração: $_" -Level "ERROR"
+        }
+    }
+    
+    # Criar configuração padrão se não existir
+    Write-Host "Configuração não encontrada. Iniciando assistente de configuração..." -ForegroundColor Yellow
+    $domain = Read-Host "Digite o nome do domínio (ex: contoso.local)"
+    $baseOU = Read-Host "Digite o caminho da OU base (ex: OU=Computadores,DC=contoso,DC=local)"
+    $inactiveDays = Read-Host "Digite o número de dias para considerar um computador inativo (padrão: 90)"
+    if ([string]::IsNullOrEmpty($inactiveDays)) { $inactiveDays = 90 }
+    
+    $config = @{
+        Domain = $domain
+        BaseOU = $baseOU
+        LogPath = "C:\Logs\Gestao_Ativos.log"
+        ReportPath = "C:\Relatorios"
+        MaxThreads = 20
+        InactiveDays = [int]$inactiveDays
+        Theme = @{
+            MenuColor = "Cyan"
+            HighlightColor = "Yellow"
+            ErrorColor = "Red"
+            SuccessColor = "Green"
+        }
+    }
+    
+    $config | ConvertTo-Json | Set-Content -Path $ConfigPath
+    Write-Log "Nova configuração criada e salva."
+    return $config
+}
+
+$Config = Load-Config
+$Domain = $Config.Domain
+$BaseOU = $Config.BaseOU
+$LogPath = $Config.LogPath
+$ReportPath = $Config.ReportPath
+$MaxThreads = $Config.MaxThreads
+$InactiveDays = $Config.InactiveDays
+$Theme = $Config.Theme
+$CacheInventory = $null
 $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 
 # Função para registrar logs
@@ -41,29 +100,30 @@ function Initialize-Directories {
 # Interface do menu
 function Show-Menu {
     Clear-Host
-    Write-Host "======================================" -ForegroundColor Cyan
-    Write-Host "       Gestão de Ativos       " -ForegroundColor Cyan
-    Write-Host "======================================" -ForegroundColor Cyan
-    Write-Host "   _____" -ForegroundColor Yellow
-    Write-Host "  /     \   Gestão de Equipamentos" -ForegroundColor Yellow
-    Write-Host " /_______\" -ForegroundColor Yellow
-    Write-Host " |  AD   |  v1.0 " -ForegroundColor Yellow
-    Write-Host " |_______|" -ForegroundColor Yellow
-    Write-Host "======================================" -ForegroundColor Cyan
-    Write-Host "1. Listar equipamentos por setor" -ForegroundColor Yellow
-    Write-Host "2. Listar equipamentos por usuário" -ForegroundColor Yellow
-    Write-Host "3. Listar usuários inativos" -ForegroundColor Yellow
-    Write-Host "4. Listar equipamentos online/offline" -ForegroundColor Yellow
-    Write-Host "5. Listar equipamentos órfãos" -ForegroundColor Yellow
-    Write-Host "6. Exportar relatório completo (CSV)" -ForegroundColor Yellow
-    Write-Host "7. Exportar relatório completo (HTML)" -ForegroundColor Yellow
-    Write-Host "8. Limpar equipamentos inativos" -ForegroundColor Yellow
-    Write-Host "9. Limpar cache" -ForegroundColor Yellow
-    Write-Host "10. Sair" -ForegroundColor Red
-    Write-Host "======================================" -ForegroundColor Cyan
-    $choice = Read-Host "Escolha uma opção (1-10)"
+    Write-Host "======================================" -ForegroundColor $Theme.MenuColor
+    Write-Host "       Gestão de Ativos       " -ForegroundColor $Theme.MenuColor
+    Write-Host "======================================" -ForegroundColor $Theme.MenuColor
+    Write-Host "   _____" -ForegroundColor $Theme.HighlightColor
+    Write-Host "  /     \   Gestão de Equipamentos" -ForegroundColor $Theme.HighlightColor
+    Write-Host " /_______\" -ForegroundColor $Theme.HighlightColor
+    Write-Host " |  AD   |  v1.1 " -ForegroundColor $Theme.HighlightColor
+    Write-Host " |_______|" -ForegroundColor $Theme.HighlightColor
+    Write-Host "======================================" -ForegroundColor $Theme.MenuColor
+    Write-Host "1. Listar equipamentos por setor" -ForegroundColor $Theme.HighlightColor
+    Write-Host "2. Listar equipamentos por usuário" -ForegroundColor $Theme.HighlightColor
+    Write-Host "3. Listar usuários inativos" -ForegroundColor $Theme.HighlightColor
+    Write-Host "4. Listar equipamentos online/offline" -ForegroundColor $Theme.HighlightColor
+    Write-Host "5. Listar equipamentos órfãos" -ForegroundColor $Theme.HighlightColor
+    Write-Host "6. Pesquisa avançada (filtros múltiplos)" -ForegroundColor $Theme.HighlightColor
+    Write-Host "7. Exportar relatório completo (CSV)" -ForegroundColor $Theme.HighlightColor
+    Write-Host "8. Exportar relatório completo (HTML)" -ForegroundColor $Theme.HighlightColor
+    Write-Host "9. Limpar equipamentos inativos" -ForegroundColor $Theme.HighlightColor
+    Write-Host "10. Limpar cache" -ForegroundColor $Theme.HighlightColor
+    Write-Host "11. Configurações" -ForegroundColor $Theme.HighlightColor
+    Write-Host "12. Sair" -ForegroundColor $Theme.ErrorColor
+    Write-Host "======================================" -ForegroundColor $Theme.MenuColor
+    $choice = Read-Host "Escolha uma opção (1-12)"
     return $choice
-
 }
 
 # Função para coletar informações do AD
@@ -173,14 +233,19 @@ function Get-ADInventory {
         # Aguardar conclusão dos jobs e coletar resultados
         $i = 0
         $total = $inventoryJobs.Count
+        $activity = "Processando computadores no Active Directory"
+        
         foreach ($job in $inventoryJobs) {
             $i++
-            Write-Progress -Activity "Processando computadores" -Status "Computador $i de $total" -PercentComplete (($i / $total) * 100)
+            $percentComplete = ($i / $total) * 100
+            $status = "Processando $i de $total ($($computer.Name)) - $([math]::Round($percentComplete,2))%"
+            
+            Write-Progress -Activity $activity -Status $status -PercentComplete $percentComplete
             $result = Receive-Job -Job $job -Wait
             if ($result) { $inventory += $result }
             Remove-Job -Job $job
         }
-        Write-Progress -Activity "Processando computadores" -Completed
+        Write-Progress -Activity $activity -Completed
         $script:CacheInventory = $inventory
         Write-Log "Inventário concluído com $($inventory.Count) itens."
     } catch {
@@ -295,29 +360,40 @@ function Export-ReportHTML {
 # Função para limpar equipamentos inativos
 function Clear-InactiveEquipment {
     $inventory = Get-ADInventory
-    if (-not $inventory) { Write-Host "Nenhum dado para processar." -ForegroundColor Yellow; Pause; return }
-    $threshold = (Get-Date).AddDays(-90)
+    if (-not $inventory) { Write-Host "Nenhum dado para processar." -ForegroundColor $Theme.HighlightColor; Pause; return }
+    
+    $threshold = (Get-Date).AddDays(-$InactiveDays)
     $inactive = $inventory | Where-Object { $_.LastLogonDate -and $_.LastLogonDate -lt $threshold }
     
     if ($inactive) {
-        Write-Host "`nEquipamentos inativos há mais de 90 dias" -ForegroundColor Cyan
+        Write-Host "`nEquipamentos inativos há mais de $InactiveDays dias" -ForegroundColor $Theme.MenuColor
         Write-Host "----------------------------------------"
         $inactive | Format-Table ComputerName, LastLogonDate, User, Department, SerialNumber, IPAddress -AutoSize
+        
+        # Criar backup antes de remover
+        $backupPath = "$ReportPath\Backup_Inativos_$Timestamp.csv"
+        $inactive | Export-Csv -Path $backupPath -NoTypeInformation -Encoding UTF8
+        Write-Host "Backup dos equipamentos a serem removidos criado em: $backupPath" -ForegroundColor $Theme.SuccessColor
+        
         $confirm = Read-Host "Deseja remover esses equipamentos do Active Directory? (S/N)"
         if ($confirm -eq "S") {
+            $successCount = 0
+            $errorCount = 0
             foreach ($item in $inactive) {
                 try {
                     Remove-ADComputer -Identity $item.ComputerName -Server $Domain -Confirm:$false -ErrorAction Stop
                     Write-Log "Computador $($item.ComputerName) removido do AD."
+                    $successCount++
                 } catch {
                     Write-Log "Erro ao remover $($item.ComputerName): $_" -Level "ERROR"
+                    $errorCount++
                 }
             }
             $script:CacheInventory = $null # Limpar cache após remoção
-            Write-Host "Equipamentos removidos. Cache limpo." -ForegroundColor Green
+            Write-Host "Remoção concluída: $successCount equipamentos removidos com sucesso, $errorCount falhas." -ForegroundColor $Theme.SuccessColor
         }
     } else {
-        Write-Host "`nNenhum equipamento inativo há mais de 90 dias." -ForegroundColor Yellow
+        Write-Host "`nNenhum equipamento inativo há mais de $InactiveDays dias." -ForegroundColor $Theme.HighlightColor
     }
     Pause
 }
@@ -328,6 +404,59 @@ function Clear-Cache {
     Get-Job | Remove-Job -Force
     Write-Log "Cache limpo e jobs removidos."
     Write-Host "Cache limpo. O próximo inventário será atualizado." -ForegroundColor Green
+    Pause
+}
+
+# Adicionar nova função de pesquisa avançada:
+function Search-AdvancedFilter {
+    $inventory = Get-ADInventory
+    if (-not $inventory) { Write-Host "Nenhum dado para filtrar." -ForegroundColor $Theme.HighlightColor; Pause; return }
+    
+    Write-Host "`nPesquisa Avançada - Filtros Múltiplos" -ForegroundColor $Theme.MenuColor
+    Write-Host "----------------------------------------"
+    Write-Host "Deixe em branco os campos que não deseja filtrar" -ForegroundColor $Theme.HighlightColor
+    
+    $computerFilter = Read-Host "Nome do computador contém"
+    $userFilter = Read-Host "Nome de usuário contém"
+    $deptFilter = Read-Host "Departamento contém"
+    $osFilter = Read-Host "Sistema operacional contém"
+    $statusFilter = Read-Host "Status (Online/Offline)"
+    
+    $filtered = $inventory
+    
+    if (-not [string]::IsNullOrEmpty($computerFilter)) {
+        $filtered = $filtered | Where-Object { $_.ComputerName -like "*$computerFilter*" }
+    }
+    
+    if (-not [string]::IsNullOrEmpty($userFilter)) {
+        $filtered = $filtered | Where-Object { $_.User -like "*$userFilter*" }
+    }
+    
+    if (-not [string]::IsNullOrEmpty($deptFilter)) {
+        $filtered = $filtered | Where-Object { $_.Department -like "*$deptFilter*" }
+    }
+    
+    if (-not [string]::IsNullOrEmpty($osFilter)) {
+        $filtered = $filtered | Where-Object { $_.OperatingSystem -like "*$osFilter*" }
+    }
+    
+    if (-not [string]::IsNullOrEmpty($statusFilter)) {
+        $filtered = $filtered | Where-Object { $_.OnlineStatus -like "*$statusFilter*" }
+    }
+    
+    if ($filtered.Count -gt 0) {
+        Write-Host "`nResultados da pesquisa ($($filtered.Count) itens encontrados):" -ForegroundColor $Theme.SuccessColor
+        $filtered | Format-Table ComputerName, User, Department, OperatingSystem, LastLogonDate, OnlineStatus, IPAddress -AutoSize
+        
+        $exportOption = Read-Host "Deseja exportar estes resultados? (S/N)"
+        if ($exportOption -eq "S") {
+            $filePath = "$ReportPath\Pesquisa_Avançada_$Timestamp.csv"
+            $filtered | Export-Csv -Path $filePath -NoTypeInformation -Encoding UTF8
+            Write-Host "Resultados exportados para $filePath" -ForegroundColor $Theme.SuccessColor
+        }
+    } else {
+        Write-Host "Nenhum resultado encontrado com os filtros especificados." -ForegroundColor $Theme.ErrorColor
+    }
     Pause
 }
 
@@ -343,11 +472,55 @@ do {
         "3" { List-InactiveUsers }
         "4" { List-OnlineOffline }
         "5" { List-OrphanedEquipment }
-        "6" { Export-ReportCSV }
-        "7" { Export-ReportHTML }
-        "8" { Clear-InactiveEquipment }
-        "9" { Clear-Cache }
-        "10" { Write-Log "Sistema encerrado."; Write-Host "Sair..." -ForegroundColor Red; break }
-        default { Write-Host "Opção inválida!" -ForegroundColor Red; Pause }
+        "6" { Search-AdvancedFilter }
+        "7" { Export-ReportCSV }
+        "8" { Export-ReportHTML }
+        "9" { Clear-InactiveEquipment }
+        "10" { Clear-Cache }
+        "11" { Edit-Configuration }
+        "12" { Write-Log "Sistema encerrado."; Write-Host "Sair..." -ForegroundColor $Theme.ErrorColor; break }
+        default { Write-Host "Opção inválida!" -ForegroundColor $Theme.ErrorColor; Pause }
     }
 } while ($true)
+
+# Adicionar no início do script, antes do código principal:
+param (
+    [Parameter(Mandatory = $false)]
+    [switch]$ExportCSV,
+    
+    [Parameter(Mandatory = $false)]
+    [switch]$ExportHTML,
+    
+    [Parameter(Mandatory = $false)]
+    [switch]$NonInteractive,
+    
+    [Parameter(Mandatory = $false)]
+    [string]$OutputPath
+)
+
+# Suporte para modo não interativo via parâmetros
+if ($NonInteractive) {
+    Write-Log "Iniciando em modo não interativo"
+    
+    # Definir caminho de saída personalizado, se fornecido
+    if ($OutputPath) {
+        $ReportPath = $OutputPath
+        if (-not (Test-Path $ReportPath)) { 
+            New-Item -Path $ReportPath -ItemType Directory -Force | Out-Null 
+            Write-Log "Criado diretório de saída personalizado: $ReportPath"
+        }
+    }
+    
+    if ($ExportCSV) {
+        Write-Log "Exportando relatório CSV automaticamente..."
+        Export-ReportCSV
+    }
+    
+    if ($ExportHTML) {
+        Write-Log "Exportando relatório HTML automaticamente..."
+        Export-ReportHTML
+    }
+    
+    Write-Log "Execução em modo não interativo concluída"
+    exit
+}
